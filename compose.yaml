@@ -1,0 +1,81 @@
+name: vulnwatch
+
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: vulnwatch
+      POSTGRES_USER: vulnwatch
+      POSTGRES_PASSWORD: vulnwatch
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vulnwatch -d vulnwatch"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    # not exposed publicly: reachable only on the compose-internal network
+    restart: unless-stopped
+
+  migrate:
+    build:
+      context: ./backend
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://vulnwatch:vulnwatch@db:5432/vulnwatch
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  backend:
+    build:
+      context: ./backend
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://vulnwatch:vulnwatch@db:5432/vulnwatch
+      SYNC_INTERVAL_SECONDS: ${SYNC_INTERVAL_SECONDS:-3600}
+      CVE_NOW_BASE_URL: ${CVE_NOW_BASE_URL:-https://cve.now}
+      CISA_KEV_URL: ${CISA_KEV_URL:-https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json}
+      ALLOW_MANUAL_SYNC: ${ALLOW_MANUAL_SYNC:-true}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request;urllib.request.urlopen('http://localhost:8000/api/health', timeout=5)\""]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  collector:
+    build:
+      context: ./backend
+    command: ["python", "-m", "app.collector_main"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://vulnwatch:vulnwatch@db:5432/vulnwatch
+      SYNC_INTERVAL_SECONDS: ${SYNC_INTERVAL_SECONDS:-3600}
+      HTTP_TIMEOUT_SECONDS: ${HTTP_TIMEOUT_SECONDS:-30}
+      HTTP_RETRIES: ${HTTP_RETRIES:-3}
+      CVE_NOW_BASE_URL: ${CVE_NOW_BASE_URL:-https://cve.now}
+      CISA_KEV_URL: ${CISA_KEV_URL:-https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json}
+      CVE_NOW_MAX_PAGES_PER_RUN: ${CVE_NOW_MAX_PAGES_PER_RUN:-4}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+    ports:
+      # bound to localhost only; change host port in a .env file if needed
+      - "${VULNWATCH_BIND:-127.0.0.1}:${VULNWATCH_PORT:-8080}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  db-data:
