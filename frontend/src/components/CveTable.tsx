@@ -3,16 +3,21 @@ import { Link, useSearchParams } from "react-router-dom";
 import {
   api,
   fmtDate,
+  SOURCE_FILTER_OPTIONS,
+  sourceLabel,
+  type Priority,
   type SeverityBucket,
   type VulnListResponse,
 } from "../api";
-import { severityDisplay, severityLabel } from "../severity";
+import { PRIORITY_DOC, priorityLabel, severityDisplay, severityLabel } from "../severity";
 import {
   EmptyState,
   ErrorState,
   KevBadge,
   NotKevBadge,
+  PriorityBadge,
   SevBadgeWithScore,
+  SourceBadge,
   TableSkeleton,
   WatchBadge,
 } from "./badges";
@@ -33,6 +38,17 @@ const SEVERITIES: SeverityBucket[] = [
   "unknown",
 ];
 
+const PRIORITIES: Exclude<Priority, "unknown">[] = ["urgent", "high", "medium", "low"];
+
+export function epssDisplay(item: {
+  epss_score: number | null;
+  epss_percentile: number | null;
+}): string {
+  if (item.epss_score == null) return "Unknown";
+  const pct = item.epss_percentile != null ? ` (${Math.round(item.epss_percentile * 100)}th pct)` : "";
+  return `${(item.epss_score * 100).toFixed(1)}%${pct}`;
+}
+
 export default function CveTable({
   kevOnlyDefault = false,
   showKevDateColumn = false,
@@ -51,13 +67,18 @@ export default function CveTable({
   const dateTo = params.get("date_to") ?? "";
   const watchlistOnly = params.get("watchlist") === "true";
   const kevOnly = params.get("kev") ?? (kevOnlyDefault ? "true" : "false");
+  const ransomwareOnly = params.get("ransomware") === "true";
+  const priority = (params.get("priority") ?? "") as Exclude<Priority, "unknown"> | "";
+  const source = params.get("source") ?? "";
+  const minEpss = params.get("min_epss") ?? "";
+  const minEpssPctl = params.get("min_epss_pct") ?? "";
 
   const pageNum =
     (data && page > data.pages && data.pages > 0 ? data.pages : page) ?? page;
   const queryKey = useMemo(
     () =>
-      `page=${pageNum}&q=${encodeURIComponent(q)}&severity=${severity}&from=${dateFrom}&to=${dateTo}&w=${watchlistOnly}&k=${kevOnly}`,
-    [pageNum, q, severity, dateFrom, dateTo, watchlistOnly, kevOnly],
+      `page=${pageNum}&q=${encodeURIComponent(q)}&severity=${severity}&from=${dateFrom}&to=${dateTo}&w=${watchlistOnly}&k=${kevOnly}&r=${ransomwareOnly}&p=${priority}&src=${source}&e=${minEpss}&ep=${minEpssPctl}`,
+    [pageNum, q, severity, dateFrom, dateTo, watchlistOnly, kevOnly, ransomwareOnly, priority, source, minEpss, minEpssPctl],
   );
 
   useEffect(() => {
@@ -74,6 +95,11 @@ export default function CveTable({
         date_to: dateTo || undefined,
         watchlist_only: watchlistOnly,
         kev_only: kevOnly === "true",
+        ransomware_only: ransomwareOnly,
+        priority: priority || undefined,
+        source: source || undefined,
+        min_epss: minEpss ? Number(minEpss) : undefined,
+        min_epss_percentile: minEpssPctl ? Number(minEpssPctl) : undefined,
       })
       .then((d) => {
         if (alive) {
@@ -121,9 +147,17 @@ export default function CveTable({
   if (dateTo) activeChips.push({ key: "date_to", label: `To: ${dateTo}` });
   if (watchlistOnly && !kevOnlyDefault)
     activeChips.push({ key: "watchlist", label: "Watchlist only" });
+  if (priority)
+    activeChips.push({ key: "priority", label: `${priorityLabel[priority]} priority` });
+  if (source) activeChips.push({ key: "source", label: `Source: ${sourceLabel(source)}` });
+  if (minEpss) activeChips.push({ key: "min_epss", label: `Min EPSS: ${Number(minEpss).toFixed(2)}` });
+  if (minEpssPctl)
+    activeChips.push({ key: "min_epss_pct", label: `Min EPSS percentile: ${Number(minEpssPctl).toFixed(2)}` });
+  if (ransomwareOnly)
+    activeChips.push({ key: "ransomware", label: "CISA ransomware campaigns" });
 
   const hasFilters =
-    !!(q || severity || dateFrom || dateTo || (watchlistOnly && !kevOnlyDefault));
+    !!(q || severity || dateFrom || dateTo || minEpss || minEpssPctl || priority || source || ransomwareOnly || (watchlistOnly && !kevOnlyDefault));
 
   return (
     <div>
@@ -213,6 +247,84 @@ export default function CveTable({
               Exploited only
             </span>
           </label>
+          <label>
+            <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+              <input
+                type="checkbox"
+                name="ransomware"
+                checked={ransomwareOnly}
+                onChange={(e) =>
+                  setFilter({ ransomware: e.target.checked ? "true" : null })
+                }
+                aria-label="Listed in CISA known ransomware campaigns"
+              />
+              Ransomware campaigns
+            </span>
+          </label>
+          <label>
+            VulnWatch priority
+            <select
+              name="priority"
+              value={priority}
+              onChange={(e) => setFilter({ priority: e.target.value })}
+              aria-label="Priority"
+              title={PRIORITY_DOC}
+            >
+              <option value="">All priorities</option>
+              {PRIORITIES.map((p) => (
+                <option key={p} value={p}>
+                  {priorityLabel[p]}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Source
+            <select
+              name="source"
+              value={source}
+              onChange={(e) => setFilter({ source: e.target.value })}
+              aria-label="Intelligence source"
+              title="Only CVEs that carry a record from the selected intelligence source"
+            >
+              <option value="">All sources</option>
+              {SOURCE_FILTER_OPTIONS.map((s) => (
+                <option key={s} value={s}>
+                  {sourceLabel(s)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Min EPSS score (0–1)
+            <input
+              type="number"
+              name="min_epss"
+              value={minEpss}
+              onChange={(e) => setFilter({ min_epss: e.target.value })}
+              min={0}
+              max={1}
+              step={0.05}
+              placeholder="e.g. 0.10"
+              aria-label="Minimum EPSS score"
+              title="FIRST EPSS probability of exploitation within 30 days"
+            />
+          </label>
+          <label>
+            Min EPSS percentile (0–1)
+            <input
+              type="number"
+              name="min_epss_pct"
+              value={minEpssPctl}
+              onChange={(e) => setFilter({ min_epss_pct: e.target.value })}
+              min={0}
+              max={1}
+              step={0.05}
+              placeholder="e.g. 0.50"
+              aria-label="Minimum EPSS percentile"
+              title="Share of all scored CVEs with the same or lower EPSS score"
+            />
+          </label>
           <button className="btn" type="submit">
             Apply search
           </button>
@@ -263,8 +375,11 @@ export default function CveTable({
                     <th scope="col">CVE ID and title</th>
                     <th scope="col">Published</th>
                     <th scope="col">Severity</th>
+                    <th scope="col">Sources</th>
                     <th scope="col">Watchlist</th>
                     {showKevDateColumn && <th scope="col">CISA date added</th>}
+                    <th scope="col">EPSS</th>
+                    <th scope="col">Priority</th>
                     <th scope="col">Exploitation</th>
                   </tr>
                 </thead>
@@ -284,12 +399,25 @@ export default function CveTable({
                           text={severityDisplay(item)}
                         />
                       </td>
+                      <td data-label="Sources">
+                        <div className="source-tags">
+                          {item.sources.map((s) => (
+                            <SourceBadge key={s} source={s} />
+                          ))}
+                        </div>
+                      </td>
                       <td data-label="Watchlist">
                         <WatchBadge matches={item.watchlist_matches} />
                       </td>
                       {showKevDateColumn && (
                         <td data-label="CISA date added">{fmtDate(item.kev_date_added)}</td>
                       )}
+                      <td data-label="EPSS" title="FIRST EPSS probability of exploitation within 30 days">
+                        {epssDisplay(item)}
+                      </td>
+                      <td data-label="Priority" title={PRIORITY_DOC}>
+                        <PriorityBadge priority={item.priority} />
+                      </td>
                       <td data-label="Exploitation">
                         {item.kev ? <KevBadge /> : <NotKevBadge />}
                       </td>

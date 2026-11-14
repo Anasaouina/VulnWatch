@@ -1,4 +1,4 @@
-import type { SeverityBucket } from "./api";
+import type { Priority, SeverityBucket } from "./api";
 
 export const severityLabel: Record<SeverityBucket, string> = {
   critical: "Critical",
@@ -7,6 +7,18 @@ export const severityLabel: Record<SeverityBucket, string> = {
   low: "Low",
   unknown: "Unknown",
 };
+
+/** VulnWatch priority labels — our assessment, not an official rating. */
+export const priorityLabel: Record<Priority, string> = {
+  urgent: "P-Urgent",
+  high: "P-High",
+  medium: "P-Medium",
+  low: "P-Low",
+  unknown: "P-Unknown",
+};
+
+export const PRIORITY_DOC =
+  "VulnWatch priority: our assessment combining CVSS severity, FIRST EPSS exploitation likelihood and CISA KEV listing; not an official FIRST, CISA or CVSS rating.";
 
 export function severityDisplay(item: {
   severity_bucket: SeverityBucket;

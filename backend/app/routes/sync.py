@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from ..collector import RunLock, run_sync
 from ..config import settings
 from ..db import get_session
-from ..models import SyncState
+from ..models import SOURCES, SyncState
 
 router = APIRouter(prefix="/api/sync", tags=["sync"])
 
@@ -19,7 +19,7 @@ def describe_sync(session: Session) -> dict:
     by_source = {r.source: r for r in rows}
     interval = settings.sync_interval_seconds
     sources = []
-    for src in ("cve_now", "cisa_kev"):
+    for src in SOURCES:
         r = by_source.get(src)
         sources.append(
             {
@@ -29,6 +29,7 @@ def describe_sync(session: Session) -> dict:
                 "last_success_at": r.last_success_at.isoformat() if r and r.last_success_at else None,
                 "error_message": r.error_message if r else None,
                 "records_processed": r.records_processed if r else 0,
+                "checkpoint": r.checkpoint if r else None,
                 "stale": bool(
                     r
                     and r.last_success_at is None

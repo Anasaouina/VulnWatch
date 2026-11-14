@@ -11,7 +11,7 @@ export default function KevList() {
         kevOnlyDefault
         showKevDateColumn
         baseTitle="Known Exploited"
-        description="CVEs from the CISA Known Exploited Vulnerabilities catalog. These are observed in exploitation — treat watchlist matches here as urgent, but verify your exposure."
+        description="CVEs listed in the CISA Known Exploited Vulnerabilities catalog — confirmed exploited in the wild per CISA. VulnWatch priority marks every listing URGENT by rule, but a listed CVE is not proof that a system you run is affected; verify exposure. The catalog is also not an exhaustive list of all exploited vulnerabilities."
       />
     </div>
   );

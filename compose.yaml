@@ -37,6 +37,8 @@ services:
       SYNC_INTERVAL_SECONDS: ${SYNC_INTERVAL_SECONDS:-3600}
       CVE_NOW_BASE_URL: ${CVE_NOW_BASE_URL:-https://cve.now}
       CISA_KEV_URL: ${CISA_KEV_URL:-https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json}
+      PRIORITY_EPSS_HIGH: ${PRIORITY_EPSS_HIGH:-0.5}
+      PRIORITY_EPSS_ELEVATED: ${PRIORITY_EPSS_ELEVATED:-0.1}
       ALLOW_MANUAL_SYNC: ${ALLOW_MANUAL_SYNC:-true}
     depends_on:
       migrate:
@@ -58,9 +60,38 @@ services:
       SYNC_INTERVAL_SECONDS: ${SYNC_INTERVAL_SECONDS:-3600}
       HTTP_TIMEOUT_SECONDS: ${HTTP_TIMEOUT_SECONDS:-30}
       HTTP_RETRIES: ${HTTP_RETRIES:-3}
+      HTTP_RETRY_BACKOFF_SECONDS: ${HTTP_RETRY_BACKOFF_SECONDS:-5}
       CVE_NOW_BASE_URL: ${CVE_NOW_BASE_URL:-https://cve.now}
       CISA_KEV_URL: ${CISA_KEV_URL:-https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json}
+      EPSS_BULK_URL: ${EPSS_BULK_URL:-https://epss.empiricalsecurity.com/epss_scores-current.csv.gz}
       CVE_NOW_MAX_PAGES_PER_RUN: ${CVE_NOW_MAX_PAGES_PER_RUN:-4}
+      PRIORITY_EPSS_HIGH: ${PRIORITY_EPSS_HIGH:-0.5}
+      PRIORITY_EPSS_ELEVATED: ${PRIORITY_EPSS_ELEVATED:-0.1}
+      NVD_API_URL: ${NVD_API_URL:-https://services.nvd.nist.gov/rest/json/cves/2.0}
+      NVD_API_KEY: ${NVD_API_KEY:-}
+      NVD_MAX_PAGES_PER_RUN: ${NVD_MAX_PAGES_PER_RUN:-3}
+      NVD_PAGE_PAUSE_SECONDS: ${NVD_PAGE_PAUSE_SECONDS:-7}
+      GH_ADV_URL: ${GH_ADV_URL:-https://api.github.com/advisories}
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      GH_ADV_MAX_PAGES_PER_RUN: ${GH_ADV_MAX_PAGES_PER_RUN:-4}
+      OSV_API_URL: ${OSV_API_URL:-https://api.osv.dev/v1/vulns}
+      OSV_MAX_PER_RUN: ${OSV_MAX_PER_RUN:-30}
+      EXPLOIT_DB_URL: ${EXPLOIT_DB_URL:-https://gitlab.com/exploit-database/exploitdb/-/raw/main/files_exploits.csv}
+      METASPLOIT_URL: ${METASPLOIT_URL:-https://raw.githubusercontent.com/rapid7/metasploit-framework/master/db/modules_metadata_base.json}
+      NUCLEI_TREE_URL: ${NUCLEI_TREE_URL:-https://api.github.com/repos/projectdiscovery/nuclei-templates/git/trees/main?recursive=1}
+      POC_BASE_URL: ${POC_BASE_URL:-https://raw.githubusercontent.com/nomi-sec/PoC-in-GitHub/master}
+      POC_MAX_PER_RUN: ${POC_MAX_PER_RUN:-15}
+      REDHAT_SECURITYDATA_URL: ${REDHAT_SECURITYDATA_URL:-https://access.redhat.com/hydra/rest/securitydata/cve.json}
+      REDHAT_MAX_PAGES_PER_RUN: ${REDHAT_MAX_PAGES_PER_RUN:-5}
+      DEBIAN_TRACKER_URL: ${DEBIAN_TRACKER_URL:-https://security-tracker.debian.org/tracker/data/json}
+      UBUNTU_API_URL: ${UBUNTU_API_URL:-https://cve.ubuntu.com/api/v0/cves/}
+      UBUNTU_MAX_PAGES_PER_RUN: ${UBUNTU_MAX_PAGES_PER_RUN:-5}
+      CISA_ADVISORIES_URL: ${CISA_ADVISORIES_URL:-https://www.cisa.gov/cybersecurity-advisories/all.xml}
+      THREATFOX_API_URL: ${THREATFOX_API_URL:-https://threatfox-api.abuse.ch/api/v1/}
+      THREATFOX_AUTH_KEY: ${THREATFOX_AUTH_KEY:-}
+      VULNERS_API_URL: ${VULNERS_API_URL:-https://vulners.com/api/v3/search/id/}
+      VULNERS_API_KEY: ${VULNERS_API_KEY:-}
+      VULNERS_MAX_PER_RUN: ${VULNERS_MAX_PER_RUN:-20}
     depends_on:
       migrate:
         condition: service_completed_successfully

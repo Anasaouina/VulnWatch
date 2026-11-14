@@ -1,10 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func, or_, select
+from sqlalchemy import case, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
+from ..config import settings
 from ..db import get_session
-from ..models import CvssScore, Vulnerability, WatchlistMatch
+from ..models import CvssScore, EpssScore, SourceRecord, SOURCE_RECORD_SOURCES, Vulnerability, WatchlistMatch
 from ..normalize import severity_bucket
+from ..priority import PRIORITY_RANK
 from ..seed import seed_watchlist
 from ..serialize import vuln_detail, vuln_list_item
 
@@ -15,12 +17,32 @@ def _records_collected_bound():
     return func.coalesce(Vulnerability.published_at, Vulnerability.first_seen_at)
 
 
-SEVERITY_SQL = {
-    "critical": ("score >= :lo", {"lo": 9.0}),
-    "high": ("score >= 7.0", ()),
-    "medium": ("score >= 4.0", ()),
-    "low": ("score > 0.0", ()),
-}
+def _priority_case(cvss_subq, epss_subq):
+    """SQL mirror of app/priority.py rules for filtering and sorting.
+
+    Only the numeric-CVSS path is approximate here: records whose severity
+    comes from a stated label rather than numeric CVSS rank as "low"/unknown
+    in SQL but are labeled precisely by the serializer. Documented limits of
+    the SQL approximation; the serialized priority remains the exact one.
+    """
+    high = settings.priority_epss_high
+    elevated = settings.priority_epss_elevated
+    return case(
+        (Vulnerability.is_kev.is_(True), PRIORITY_RANK["urgent"]),
+        (
+            (epss_subq.isnot(None)) & (epss_subq >= high) & (func.coalesce(cvss_subq, 0.0) >= 7.0),
+            PRIORITY_RANK["high"],
+        ),
+        (
+            (epss_subq.isnot(None)) & (
+                ((epss_subq >= elevated) & (func.coalesce(cvss_subq, 0.0) >= 7.0))
+                | (epss_subq >= high)
+            ),
+            PRIORITY_RANK["medium"],
+        ),
+        (epss_subq.isnot(None) | cvss_subq.isnot(None), PRIORITY_RANK["low"]),
+        else_=PRIORITY_RANK["unknown"],
+    )
 
 
 @router.get("")
@@ -36,6 +58,23 @@ def list_vulns(
     date_to: str | None = Query(None, description="ISO date or datetime"),
     watchlist_only: bool = Query(False),
     kev_only: bool = Query(False),
+    ransomware_only: bool = Query(
+        False, description="Only CVEs marked Known in CISA ransomware campaign use"
+    ),
+    source: str | None = Query(
+        None,
+        description="Only CVEs carrying a record from this source "
+        f"(one of: {', '.join(SOURCE_RECORD_SOURCES)})",
+    ),
+    priority: str | None = Query(
+        None, pattern="^(urgent|high|medium|low)$",
+        description="VulnWatch priority (assessment, not an official rating)",
+    ),
+    min_epss: float | None = Query(None, ge=0.0, le=1.0),
+    min_epss_percentile: float | None = Query(None, ge=0.0, le=1.0),
+    sort: str | None = Query(
+        None, pattern="^(newest|priority_desc|epss_desc|cvss_desc)$"
+    ),
 ):
     from datetime import date
 
@@ -46,8 +85,22 @@ def list_vulns(
     stmt = select(Vulnerability).options(
         selectinload(Vulnerability.cvss_scores),
         selectinload(Vulnerability.source_records),
+        selectinload(Vulnerability.epss),
     )
     count_stmt = select(func.count(func.distinct(Vulnerability.id))).select_from(Vulnerability)
+
+    # scalar subqueries for EPSS and best numeric CVSS, used for filters/sort
+    epss_subq = (
+        select(EpssScore.score)
+        .where(EpssScore.vulnerability_id == Vulnerability.id)
+        .scalar_subquery()
+    )
+    cvss_subq = (
+        select(func.max(CvssScore.score))
+        .where(CvssScore.vulnerability_id == Vulnerability.id)
+        .scalar_subquery()
+    )
+    priority_expr = _priority_case(cvss_subq, epss_subq)
 
     if q:
         needle = f"%{q.strip()}%"
@@ -105,14 +158,62 @@ def list_vulns(
         stmt = stmt.where(matched)
         count_stmt = count_stmt.where(matched)
     if kev_only:
-        stmt = stmt.where(Vulnerability.is_kev.is_(True))
-        count_stmt = count_stmt.where(Vulnerability.is_kev.is_(True))
+        matched = Vulnerability.is_kev.is_(True)
+        stmt = stmt.where(matched)
+        count_stmt = count_stmt.where(matched)
+    if ransomware_only:
+        cond = func.lower(func.coalesce(Vulnerability.kev_ransomware_use, "")) == "known"
+        stmt = stmt.where(cond)
+        count_stmt = count_stmt.where(cond)
+    if source:
+        source_name = source.strip().lower()
+        if source_name not in SOURCE_RECORD_SOURCES:
+            raise HTTPException(
+                422,
+                {
+                    "message": f"Unknown source {source!r}. "
+                    f"Valid sources: {', '.join(SOURCE_RECORD_SOURCES)}"
+                },
+            )
+        cond = Vulnerability.id.in_(
+            select(SourceRecord.vulnerability_id).where(SourceRecord.source == source_name)
+        )
+        stmt = stmt.where(cond)
+        count_stmt = count_stmt.where(cond)
+
+    if min_epss is not None:
+        cond = epss_subq >= min_epss
+        stmt = stmt.where(cond)
+        count_stmt = count_stmt.where(cond)
+    if min_epss_percentile is not None:
+        pctl_subq = (
+            select(EpssScore.percentile)
+            .where(EpssScore.vulnerability_id == Vulnerability.id)
+            .scalar_subquery()
+        )
+        cond = pctl_subq >= min_epss_percentile
+        stmt = stmt.where(cond)
+        count_stmt = count_stmt.where(cond)
+    if priority:
+        if priority == "urgent":
+            cond = Vulnerability.is_kev.is_(True)
+        else:
+            cond = priority_expr == PRIORITY_RANK[priority]
+        stmt = stmt.where(cond)
+        count_stmt = count_stmt.where(cond)
 
     total = session.execute(count_stmt).scalar() or 0
 
-    # deterministic: newest first by best available date, tie-break by id ASC
+    # deterministic ordering; default newest first by best available date
     order_key = func.coalesce(Vulnerability.published_at, Vulnerability.first_seen_at)
-    stmt = stmt.order_by(order_key.desc().nulls_last(), Vulnerability.vuln_id.asc())
+    if sort == "priority_desc":
+        stmt = stmt.order_by(priority_expr.desc(), Vulnerability.vuln_id.asc())
+    elif sort == "epss_desc":
+        stmt = stmt.order_by(epss_subq.desc().nullslast(), Vulnerability.vuln_id.asc())
+    elif sort == "cvss_desc":
+        stmt = stmt.order_by(cvss_subq.desc().nullslast(), Vulnerability.vuln_id.asc())
+    else:
+        stmt = stmt.order_by(order_key.desc().nulls_last(), Vulnerability.vuln_id.asc())
 
     items_rows = session.execute(
         stmt.offset((page - 1) * page_size).limit(page_size)

@@ -1,12 +1,34 @@
 import type { ReactNode } from "react";
-import type { SeverityBucket, WatchMatch } from "../api";
-import { severityLabel } from "../severity";
+import type { Priority, SeverityBucket, WatchMatch } from "../api";
+import { PRIORITY_DOC, priorityLabel, severityLabel } from "../severity";
+import { sourceLabel } from "../api";
+
+/** Neutral tag chip showing one intelligence source that carries this CVE. */
+export function SourceBadge({ source }: { source: string }) {
+  return (
+    <span className="badge badge-source" title={sourceLabel(source)}>
+      {sourceLabel(source)}
+    </span>
+  );
+}
 
 export function SevBadge({ bucket }: { bucket: SeverityBucket }) {
   return (
     <span className={`badge badge-${bucket}`}>
       <span className="dot" aria-hidden="true" />
       <span>{severityLabel[bucket]}</span>
+    </span>
+  );
+}
+
+export function PriorityBadge({ priority }: { priority: Priority }) {
+  return (
+    <span
+      className={`badge badge-prio-${priority}`}
+      title={`${PRIORITY_DOC} Signals are shown per CVE in the detail view.`}
+    >
+      <span className="dot" aria-hidden="true" />
+      <span>{priorityLabel[priority]}</span>
     </span>
   );
 }

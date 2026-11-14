@@ -36,8 +36,13 @@ class KevEntry:
     raw: dict = field(default_factory=dict)
 
 
-def parse_catalog(payload) -> tuple[list[KevEntry], str | None]:
-    """Parse feed; return (entries, catalog_version). Raises on schema drift."""
+def parse_catalog(payload) -> tuple[list[KevEntry], str | None, str | None]:
+    """Parse feed; return (entries, catalog_version, date_released).
+
+    Raises on schema drift. `date_released` is the catalog-level "dateReleased"
+    string supplied by the feed (e.g. "2026-11-06T15:00:04-0500"); it is used
+    for provenance on the canonical row as-is.
+    """
     if not isinstance(payload, dict) or not isinstance(payload.get("vulnerabilities"), list):
         raise ValueError("unexpected CISA KEV response shape")
     entries: list[KevEntry] = []
@@ -72,7 +77,8 @@ def parse_catalog(payload) -> tuple[list[KevEntry], str | None]:
         # count mismatch is suspicious but not fatal; the full array is used.
         log.warning("CISA KEV count=%s but array len=%d", returned, len(payload["vulnerabilities"]))
     version = payload.get("catalogVersion") if isinstance(payload.get("catalogVersion"), str) else None
-    return entries, version
+    released = payload.get("dateReleased") if isinstance(payload.get("dateReleased"), str) else None
+    return entries, version, released
 
 
 def catalog_detail_url(vuln_id: str) -> str:
